@@ -1,0 +1,640 @@
+/*
+Copyright (C) 2023 Intel Corporation
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions
+and limitations under the License.
+*/
+
+#emit
+#include "backends/tc/tc_defines.h"
+#include "absl/strings/str_cat.h"
+#include "absl/strings/str_join.h"
+#end
+
+class TCKernelMetadata {
+    unsigned metaField;
+    toString {
+        std::string metaName = "kernel.";
+        switch (metaField) {
+            case TC::SKBREDIR: {
+                absl::StrAppend(&metaName, "skbredir");
+                break;
+            }
+            case TC::SKBIIF: {
+                absl::StrAppend(&metaName, "skbiif");
+                break;
+            }
+            case TC::SKBTSTAMP: {
+                absl::StrAppend(&metaName, "skbtstamp");
+                break;
+            }
+            case TC::SKBPRIO: {
+                absl::StrAppend(&metaName, "skbprio");
+                break;
+            }
+        }
+        return metaName;
+    }
+    dbprint { out << toString(); }
+}
+
+class TCActionParam {
+    cstring paramName;
+    unsigned dataType;
+    unsigned bitSize;
+    unsigned direction;
+    void setParamName(cstring pN) {
+        paramName = pN;
+    }
+    void setBitSize(unsigned bS) {
+        bitSize = bS;
+    }
+    void setDataType(unsigned d) {
+        dataType = d;
+    }
+    void setDirection(unsigned d){
+        direction = d;
+    }
+    TCActionParam() {
+        paramName = nullptr;
+        bitSize = 0;
+    }
+    cstring getParamName() const {
+        return paramName;
+    }
+    cstring getName() const {
+        return "param." + paramName;
+    }
+    unsigned getDirection() const {
+        return direction;
+    }
+    cstring getParamType() const {
+        std::string paramType = "";
+        switch(dataType) {
+            case TC::BIT_TYPE :
+                paramType = absl::StrCat("__u", bitSize);
+                break;
+            case TC::DEV_TYPE :
+                paramType = "dev";
+                break;
+            case TC::MACADDR_TYPE :
+                paramType = "macaddr";
+                break;
+            case TC::IPV4_TYPE :
+                paramType = "ipv4";
+                break;
+            case TC::IPV6_TYPE :
+                paramType = "ipv6";
+                break;
+            case TC::BE16_TYPE :
+                paramType = "__be16";
+                break;
+            case TC::BE32_TYPE :
+                paramType = "__be32";
+                break;
+            case TC::BE64_TYPE :
+                paramType = "__be64";
+                break;
+        } 
+        return paramType;
+    }
+    toString {
+        std::string tcActionParam = absl::StrCat("\n\tparam ", paramName.string_view(), " type ");
+        switch(dataType) {
+            case TC::BIT_TYPE :
+                absl::StrAppend(&tcActionParam, "bit", bitSize);
+                break;
+            case TC::DEV_TYPE :
+                absl::StrAppend(&tcActionParam, "dev");
+                break;
+            case TC::MACADDR_TYPE :
+                absl::StrAppend(&tcActionParam, "macaddr");
+                break;
+            case TC::IPV4_TYPE :
+                absl::StrAppend(&tcActionParam, "ipv4");
+                break;
+            case TC::IPV6_TYPE :
+                absl::StrAppend(&tcActionParam, "ipv6");
+                break;
+            case TC::BE16_TYPE :
+                absl::StrAppend(&tcActionParam, "be16");
+                break;
+            case TC::BE32_TYPE :
+                absl::StrAppend(&tcActionParam, "be32");
+                break;
+            case TC::BE64_TYPE :
+                absl::StrAppend(&tcActionParam, "be64");
+                break;
+        }
+        return tcActionParam;
+    }
+    dbprint { out << toString(); }
+}
+
+class TCDefaultActionParam {
+    TCActionParam paramDetail;
+    cstring defaultValue;
+    void setParamDetail(TCActionParam pN) {
+        paramDetail = pN;
+    }
+    void setDefaultValue(cstring dV) {
+        defaultValue = dV;
+    }
+    TCDefaultActionParam() {
+        paramDetail = nullptr;
+        defaultValue = nullptr;
+    }
+    toString {
+        std::string tcActionParam = absl::StrCat(" ", paramDetail->paramName.string_view());
+        if (defaultValue != nullptr)
+            absl::StrAppend(&tcActionParam, " ", defaultValue.string_view());
+        return tcActionParam;
+    }
+    dbprint { out << toString(); }
+}
+
+class TCAction {
+    cstring actionName;
+    cstring pipelineName;
+    unsigned actId;
+    optional safe_vector<TCActionParam> actionParams;
+    cstring getName() const {
+        if (actionName == "NoAction") {
+            return actionName;
+        }
+        std::string tcAction = absl::StrCat(pipelineName.string_view(), "/", actionName.string_view());
+        return tcAction;
+    }
+    cstring getActionName() const {
+        return actionName;
+    }
+    void setPipelineName(cstring pN) {
+        pipelineName = pN;
+    }
+    void addActionParams(TCActionParam tca) {
+        actionParams.push_back(tca);
+    }
+    void setActionId(unsigned id) {
+        actId = id;
+    }
+    TCAction(cstring aN) {
+        actionName = aN;
+        pipelineName = nullptr;
+        actId = 0;
+    }
+    toString {
+        std::string tcAction = absl::StrCat("\n$TC p4template create action/", pipelineName.string_view(), "/", actionName.string_view());
+        if (actId != 0) {
+            absl::StrAppend(&tcAction, " actid ", actId);
+        }
+        if (!actionParams.empty()) {
+            for (auto actParam : actionParams) {
+                absl::StrAppend(&tcAction, " \\", actParam->toString().string_view());
+            }
+        }
+        absl::StrAppend(&tcAction, "\n$TC p4template update action/", pipelineName.string_view(), "/", actionName.string_view(), " state active");
+
+        return tcAction;
+    }
+    dbprint { out << toString(); }
+}
+
+class TCEntry {
+    cstring action;
+    ordered_map<cstring,cstring> keys;
+    cstring getActionName() const {
+        return action;
+    }
+    toString {
+        std::string tcEntry = "";
+        for(auto k : keys) {
+            tcEntry = absl::StrJoin({tcEntry, k.first.string(), k.second.string()}, " ");
+        }
+        return tcEntry;
+    }
+    dbprint { out << toString(); }
+}
+
+class TCTable {
+    unsigned tableID;
+    cstring tableName;
+    cstring controlName;
+    cstring pipelineName;
+    cstring permissions;
+    cstring directCounterInstance;
+    unsigned keySize;
+    unsigned tableEntriesCount;
+    unsigned numMask;
+    unsigned matchType;
+    unsigned timerProfiles;
+    unsigned defaultTimerProfiles = 4;
+    TCAction defaultHitAction;
+    bool isDefaultHitConst;
+    bool isTcMayOverrideHit;
+    optional safe_vector<TCDefaultActionParam> defaultHitActionParams;
+    TCAction defaultMissAction;
+    bool isDefaultMissConst;
+    bool isTcMayOverrideMiss;
+    optional safe_vector<TCDefaultActionParam> defaultMissActionParams;
+    bool isTableAddOnMiss;
+    bool isTcMayOverride;
+    bool isDirectCounter;
+    ordered_map<TCAction, unsigned> actionList;
+    safe_vector<TCEntry> const_entries;
+
+    void setTablePermission(cstring p) {
+        permissions = p;
+    }
+    void setDirectCounter(cstring counter) {
+        isDirectCounter = true;
+        directCounterInstance = counter;
+    }
+    void setKeySize(unsigned k) {
+        keySize = k;
+    }
+    void setTableEntriesCount(unsigned t) {
+        tableEntriesCount = t;
+    }
+    void setNumMask(unsigned n) {
+        numMask = n;
+    }
+    void setMatchType(unsigned m) {
+        matchType = m;
+    }
+    void setDefaultHitAction(TCAction d) {
+        defaultHitAction = d;
+    }
+    void setDefaultMissAction(TCAction d) {
+        defaultMissAction = d;
+    }
+    void setDefaultHitConst(bool i) {
+        isDefaultHitConst = i;
+    }
+    void setDefaultMissConst(bool i) {
+        isDefaultMissConst = i;
+    }
+    void setTcMayOverrideHit() {
+        isTcMayOverrideHit = true;
+    }
+    void setTcMayOverrideMiss() {
+        isTcMayOverrideMiss = true;
+    }
+    void setTableAddOnMiss() {
+        isTableAddOnMiss = true;
+    }
+    void addAction(TCAction action, unsigned flag) {
+        actionList.emplace(action, flag);
+    }
+    void addConstEntries(TCEntry entry) {
+        const_entries.push_back(entry);
+    }
+    void addTimerProfiles(unsigned tp) {
+        timerProfiles = tp;
+    }
+    cstring getTableName() const {
+        return tableName;
+    }
+    cstring printMatchType(unsigned matchType) const {
+        cstring matchTypeString = cstring::empty;
+        switch(matchType) {
+                case TC::EXACT_TYPE :
+                    matchTypeString = "exact"_cs;
+                    break;
+                case TC::LPM_TYPE :
+                    matchTypeString = "lpm"_cs;
+                    break;
+                case TC::TERNARY_TYPE :
+                    matchTypeString = "ternary"_cs;
+                    break;
+        }
+        return matchTypeString;
+    }
+    TCTable(unsigned tId, cstring tN, cstring cN, cstring pN) {
+        tableID = tId;
+        tableName = tN;
+        controlName = cN;
+        pipelineName = pN;
+        keySize = 0;
+        timerProfiles = 0;
+        tableEntriesCount = TC::DEFAULT_TABLE_ENTRIES;
+        numMask = TC::DEFAULT_KEY_MASK;
+        matchType = TC::EXACT_TYPE;
+        defaultHitAction = nullptr;
+        defaultMissAction = nullptr;
+        isDefaultHitConst = false;
+        isDefaultMissConst = false;
+        isTcMayOverrideHit = false;
+        isTcMayOverrideMiss = false;
+        isTableAddOnMiss = false;
+        isTcMayOverride = false;
+        isDirectCounter = false;
+    }
+    toString {
+        std::string tcTable = absl::StrCat("\n$TC p4template create table/",
+                        pipelineName.string_view(), "/", controlName.string_view(), "/", tableName.string_view(), " \\",
+                        "\n\ttblid ", tableID, " \\",
+                        "\n\ttype ", printMatchType(matchType).string_view(), " \\",
+                        "\n\tkeysz ", keySize,
+                        " nummasks ", numMask,
+                        " permissions ", permissions.string_view(),
+                        " tentries ", tableEntriesCount);
+        if (isTableAddOnMiss && timerProfiles > defaultTimerProfiles) {
+            absl::StrAppend(&tcTable, " num_timer_profiles ", timerProfiles);
+        }
+        if (isDirectCounter) {
+            absl::StrAppend(&tcTable, " \\\n\tpna_direct_counter DirectCounter/", directCounterInstance.string_view());
+        }
+
+        if (!actionList.empty()) {
+            absl::StrAppend(&tcTable, " \\", "\n\ttable_acts ");
+            for (auto iter = actionList.begin(); iter != actionList.end(); iter++) {
+                absl::StrAppend(&tcTable, "act name ", iter->first->getName().string_view());
+                if (iter->second == TC::TABLEONLY) {
+                    absl::StrAppend(&tcTable, " flags tableonly");
+                } else if (iter->second == TC::DEFAULTONLY) {
+                    absl::StrAppend(&tcTable, " flags defaultonly");
+                }
+                if (std::next(iter) != actionList.end()) {
+                    absl::StrAppend(&tcTable, " \\", "\n\t");
+                }
+            }
+        }
+        if (defaultHitAction != nullptr) {
+            absl::StrAppend(&tcTable, "\n$TC p4template update table/", pipelineName.string_view(),
+                      "/", controlName.string_view(), "/", tableName.string_view(),
+                      " default_hit_action");
+            if (isDefaultHitConst) {
+                absl::StrAppend(&tcTable, " permissions 0x1024");
+            }
+            absl::StrAppend(&tcTable, " action ", defaultHitAction->getName().string_view());
+            if (!defaultHitActionParams.empty())
+                absl::StrAppend(&tcTable, " param");
+            for (auto param : defaultHitActionParams)
+                absl::StrAppend(&tcTable, param->toString().string_view());
+            if (isTcMayOverrideHit)
+                absl::StrAppend(&tcTable, " flags runtime");
+        }
+        if (defaultMissAction != nullptr) {
+            absl::StrAppend(&tcTable, "\n$TC p4template update table/", pipelineName.string_view(),
+                      "/", controlName.string_view(), "/", tableName.string_view(),
+                      " default_miss_action");
+            if (isDefaultMissConst) {
+                absl::StrAppend(&tcTable, " permissions 0x1024");
+            }
+            absl::StrAppend(&tcTable, " action ", defaultMissAction->getName().string_view());
+            if (!defaultMissActionParams.empty())
+                absl::StrAppend(&tcTable, " param");
+            for (auto param : defaultMissActionParams)
+                absl::StrAppend(&tcTable, param->toString().string_view());
+            if (isTcMayOverrideMiss)
+                absl::StrAppend(&tcTable, " flags runtime");
+        }
+        if (const_entries.size() != 0) {
+            for (auto entry : const_entries) {
+                absl::StrAppend(&tcTable, "\n$TC p4template create table/", pipelineName.string_view(),
+                                "/", controlName.string_view(), "/", tableName.string_view(),
+                                " entry", entry->toString().string_view(),
+                                " permissions 0x1024",
+                                " action ", pipelineName.string_view(),
+                                "/", controlName.string_view(), "/", entry->getActionName().string_view());
+            }
+        }
+        return tcTable;
+    }
+    dbprint { out << toString(); }
+}
+
+class TCKey {
+    unsigned keyID;
+    unsigned bitwidth;
+    cstring type;
+    cstring keyName;
+    cstring keyAttribute;
+    bool emitID;
+    bool emitValue;
+    unsigned value;
+    TCKey(unsigned id, unsigned width, cstring ptype, cstring name, cstring attr, bool isID) {
+        keyID = id;
+        bitwidth = width;
+        type = ptype;
+        keyName = name;
+        keyAttribute = attr;
+        emitID = isID;
+        emitValue = false;
+    }
+    void setValue(unsigned v) {
+        value = v;
+        emitValue = true;
+    }
+    toString {
+        std::string tckeyInstance = absl::StrCat(" ", keyAttribute.string_view(), " ", keyName.string_view(), " ptype ", type.string_view());
+        if (emitID) {
+            absl::StrAppend(&tckeyInstance, " id ", keyID);
+        }
+        if (emitValue) {
+            absl::StrAppend(&tckeyInstance, " ", value);
+        }
+        return tckeyInstance;
+    }
+    dbprint { out << toString(); }
+
+}
+
+class TCExternInstance {
+    unsigned instanceID;
+    cstring instanceName;
+    bool isNumelemns;
+    unsigned numelemns;
+    bool isControlPath;
+    bool isTablBindable;
+    bool isConstructorKeys;
+    safe_vector<TCKey> controlKeys;
+    safe_vector<TCKey> constructorKeys;
+    TCExternInstance(unsigned id, cstring name, bool isNe, unsigned ne) {
+        instanceID = id;
+        instanceName = name;
+        isNumelemns = isNe;
+        numelemns = ne;
+        isControlPath = false;
+        isTablBindable = false;
+        isConstructorKeys = false;
+    }
+    void addControlPathKeys(safe_vector<TCKey> k) {
+        if (k.size() > 0) {
+            isControlPath = true;
+            controlKeys = k;
+        }
+    }
+    void addConstructorKeys(safe_vector<TCKey> k) {
+        if (k.size() > 0) {
+            isConstructorKeys = true;
+            constructorKeys = k;
+        }
+    }
+    void setExternTableBindable(bool flag) {
+        isTablBindable = flag;
+    }
+    void setNumElements(unsigned ne) {
+        isNumelemns = true;
+        numelemns = ne;
+    } 
+    toString {
+        std::string tcExternInstance = absl::StrCat(instanceName.string_view(), " instid ", instanceID, " \\");
+        if (isNumelemns) {
+            absl::StrAppend(&tcExternInstance, "\ntc_numel ", numelemns, " \\");
+        }
+        if (isTablBindable) {
+            absl::StrAppend(&tcExternInstance, "\ntbl_bindable", " \\");
+        }
+        if (isConstructorKeys) {
+            absl::StrAppend(&tcExternInstance, "\nconstructor");
+            for (auto field : constructorKeys) {
+                absl::StrAppend(&tcExternInstance, field->toString().string_view());
+            }
+            absl::StrAppend(&tcExternInstance, " \\");
+        }
+        if (isControlPath) {
+            absl::StrAppend(&tcExternInstance, "\ncontrol_path");
+            for (auto field : controlKeys) {
+                absl::StrAppend(&tcExternInstance, field->toString().string_view());
+            }
+        }
+        return tcExternInstance;
+    }
+    dbprint { out << toString(); }
+}
+
+class TCExtern {
+    cstring externName;
+    cstring pipelineName;
+    cstring acl_permisson;
+    cstring externID;
+    unsigned numinstances;
+    safe_vector<TCExternInstance> externInstances;
+    bool has_exec_method;
+    TCExtern(cstring eId, cstring eN, cstring pN, unsigned inst, cstring p, bool exec_method) {
+        externID = eId;
+        externName = eN;
+        pipelineName = pN;
+        numinstances = inst;
+        acl_permisson = p;
+        has_exec_method = exec_method;
+    }
+    void addExternInstance(TCExternInstance tei) {
+        externInstances.push_back(tei);
+    }
+    TCExternInstance getExternInstance(cstring inst_name) const {
+        for (auto extnInstDef : externInstances) {
+            if(extnInstDef->instanceName == inst_name) {
+                return extnInstDef;
+            }
+        }
+        return nullptr;
+    }
+    toString {
+        std::string tcExtern = absl::StrCat("\n$TC p4template create extern/", "root/", externName.string_view(),
+                                            " extid ", externID.string_view(), " numinstances ", numinstances, " tc_acl " + acl_permisson);
+        if (has_exec_method) {
+             absl::StrAppend(&tcExtern, " has_exec_method");
+        }
+        for (unsigned iter = 0; iter < numinstances; iter++) {
+            absl::StrAppend(&tcExtern, "\n\n$TC p4template create extern_inst/", pipelineName.string_view(),
+                      "/", externName.string_view(), "/");
+            if (externInstances.size() > iter)
+                absl::StrAppend(&tcExtern, externInstances[iter]->toString().string_view());
+        }
+        return tcExtern;
+    }
+    dbprint { out << toString(); }
+}
+
+class TCPipeline {
+    cstring pipelineName;
+    unsigned numTables;
+    TCAction NoAction;
+    safe_vector<TCAction> actionDefs;
+    safe_vector<TCTable> tableDefs;
+    safe_vector<TCExtern> externDefs;
+    TCAction preaction;
+    TCAction postaction;
+    void setPipelineName(cstring pName) {
+        pipelineName = pName;
+    }
+    void setNumTables(unsigned n) {
+        numTables = n;
+    }
+    void addNoActionDefinition(TCAction actionDef) {
+        NoAction = actionDef;
+    }
+    void addActionDefinition(TCAction actionDef) {
+        actionDefs.push_back(actionDef);
+    }
+    void addTableDefinition(TCTable tableDef) {
+        tableDefs.push_back(tableDef);
+    }
+    void setPipelinePreAction(TCAction action) {
+        preaction = action;
+    }
+    void setPipelinePostAction(TCAction action) {
+        postaction = action;
+    }
+    void addExternDefinition(TCExtern externDef) {
+        externDefs.push_back(externDef);
+    }
+    TCExtern getExternDefinition(cstring eName) const {
+        for (auto externDef : externDefs) {
+            if(externDef->externName == eName) {
+                return externDef;
+            }
+        }
+        return nullptr;
+    }
+    TCPipeline() {
+        Util::SourceInfo* srcinfo = new Util::SourceInfo();
+        Node::srcInfo = *srcinfo;
+        pipelineName = nullptr;
+    }
+    toString {
+        std::string tcCode = absl::StrCat("#!/bin/bash -x\n",
+                                        "\nset -e\n", "\nTC=\"tc\"",
+                                        "\n$TC p4template create pipeline/", pipelineName.string_view(),
+                                        " numtables ", numTables);
+        if (!actionDefs.empty()) {
+            for (auto a : actionDefs) {
+                absl::StrAppend(&tcCode, "\n", a->toString().string_view());
+            }
+        }
+        if (!externDefs.empty()) {
+            for (auto e : externDefs) {
+                absl::StrAppend(&tcCode, "\n", e->toString().string_view());
+            }
+        }
+        if (!tableDefs.empty()) {
+            for (auto t : tableDefs) {
+                absl::StrAppend(&tcCode, "\n", t->toString().string_view());
+            }
+        }
+        if (preaction != nullptr) {
+            absl::StrAppend(&tcCode, "\n", preaction->toString().string_view(),
+                            "\n$TC p4template update pipeline/", pipelineName.string_view(),
+                            " preactions action ", pipelineName.string_view(), "/preaction");
+        }
+        if (postaction != nullptr) {
+            absl::StrAppend(&tcCode, "\n", postaction->toString().string_view(),
+                            "\n$TC p4template update pipeline/", pipelineName.string_view(),
+                            " postactions action ", pipelineName.string_view(), "/postaction");
+        }
+        absl::StrAppend(&tcCode, "\n$TC p4template update pipeline/", pipelineName.string_view(), " state ready");
+        return tcCode;
+    }
+    dbprint { out << toString(); }
+}
